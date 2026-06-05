@@ -134,28 +134,57 @@ def get_data():
     sell_price = response["show_name"]["end_time_ms"]
 
 
+def make_inline_markup():
+    markup = types.InlineKeyboardMarkup()
+    markup.row(
+        types.InlineKeyboardButton("🎬 Show", callback_data="show"),
+        types.InlineKeyboardButton("📅 Today", callback_data="today")
+    )
+    markup.row(
+        types.InlineKeyboardButton("👤 Employee", callback_data="employee"),
+        types.InlineKeyboardButton("📋 BusyBoard", callback_data="busyboard")
+    )
+    markup.row(
+        types.InlineKeyboardButton("🎭 МЗЗ & 4D", callback_data="halls")
+    )
+    return markup
+
 def telegram_bot(token):
     bot = telebot.TeleBot(token)
+
     @bot.message_handler(commands=["start"])
     def start_message(message):
-        markup = types.ReplyKeyboardMarkup(resize_keyboard=True)
-        show = types.KeyboardButton("Show")
-        today = types.KeyboardButton("Today")
-        worker = types.KeyboardButton("Employee")
-        busy = types.KeyboardButton("BusyBoard")
-        markup.row(show, today)
-        markup.row(worker, busy)
-        bot.send_message(message.chat.id, f"Добро пожаловать в бот сервис БЗЗ.\n\nShow — текущий сеанс и время окончания.\nToday — расписание на день.\nEmployee — кто сегодня работает в БЗЗ.\nBusyBoard — план и занятость на день.",reply_markup=markup)
+        if message.message_thread_id:
+            chat_threads[message.chat.id] = message.message_thread_id
+        bot.send_message(
+            message.chat.id,
+            "Добро пожаловать в бот сервис БЗЗ.",
+            reply_markup=make_inline_markup(),
+            message_thread_id=chat_threads.get(message.chat.id)
+        )
 
     @bot.message_handler()
     def send_text(message):
-        time = datetime.datetime.now()
         if message.message_thread_id:
             chat_threads[message.chat.id] = message.message_thread_id
-        real_time= (datetime.datetime(time.year, time.month, time.day, time.hour+3, time.minute))
+        if message.text and message.text.lower() == "бот":
+            bot.send_message(
+                message.chat.id,
+                "Слушаю!",
+                reply_markup=make_inline_markup(),
+                message_thread_id=chat_threads.get(message.chat.id)
+            )
+
+    @bot.callback_query_handler(func=lambda call: True)
+    def handle_callback(call):
+        bot.answer_callback_query(call.id)
+        time = datetime.datetime.now()
+        real_time = (datetime.datetime(time.year, time.month, time.day, time.hour+3, time.minute))
         real_time_str = real_time.strftime('%H:%M')
-        if message.text.lower() == "show":
+        thread_id = chat_threads.get(call.message.chat.id)
+        if call.data == "show":
             try:
+                loading = bot.send_message(call.message.chat.id, "⏳ Загружаю...", message_thread_id=thread_id)
                 time_now = datetime.datetime.now()
                 start = (datetime.datetime(time_now.year, time_now.month, time_now.day, 0, 0)).isoformat() + 'Z'
                 tomorrow = time_now + datetime.timedelta(days=1)
@@ -185,23 +214,25 @@ def telegram_bot(token):
                         msg = f"Текущее время: {real_time_str}\n\nВ БЗЗ перерыв.\n\n⏭ Следующий сеанс: {next_show[0]} в {next_show[1]}"
                     else:
                         msg = f"Текущее время: {real_time_str}\n\nНа сегодня всё!"
-                bot.send_message(message.chat.id, msg, message_thread_id=chat_threads.get(message.chat.id))
+                bot.edit_message_text(msg, call.message.chat.id, loading.message_id)
             except Exception as ex:
                 print(ex)
-                bot.send_message(message.chat.id, "Упс... Что-то пошло не так...", message_thread_id=chat_threads.get(message.chat.id))
-        elif message.text.lower() == "today":
+                bot.edit_message_text("Упс... Что-то пошло не так...", call.message.chat.id, loading.message_id)
+        elif call.data == "today":
             result = get_today_events_from_google()
             results = "\n".join(result)
             bot.send_message(
-                message.chat.id,
-                f"Текущее время: {real_time_str}\n\n{results}"
+                call.message.chat.id,
+                f"Текущее время: {real_time_str}\n\n{results}",
+                message_thread_id=thread_id
             )
-        elif message.text.lower() == "employee":
+        elif call.data == "employee":
             bot.send_message(
-                message.chat.id,
-                f"{get_worker_today()}"
+                call.message.chat.id,
+                f"{get_worker_today()}",
+                message_thread_id=thread_id
             )
-        elif message.text.lower() == "busyboard":
+        elif call.data == "busyboard":
             try:
                 time_now = datetime.datetime.now()
                 start = (datetime.datetime(time_now.year, time_now.month, time_now.day, 0, 0)).isoformat() + 'Z'
@@ -222,22 +253,13 @@ def telegram_bot(token):
                         else:
                             lines.append(f"Весь день — {summary}")
                     result = '\n'.join(lines)
-                    bot.send_message(message.chat.id, f"📋 План на сегодня:\n\n{result}")
+                    bot.send_message(call.message.chat.id, f"📋 План на сегодня:\n\n{result}", message_thread_id=thread_id)
                 else:
-                    bot.send_message(message.chat.id, "На сегодня событий нет.", message_thread_id=chat_threads.get(message.chat.id))
+                    bot.send_message(call.message.chat.id, "На сегодня событий нет.", message_thread_id=thread_id)
             except Exception as ex:
                 print(ex)
-                bot.send_message(message.chat.id, "Упс... Что-то пошло не так...", message_thread_id=chat_threads.get(message.chat.id))
-        elif message.text.lower() == "бот":
-            chat_threads[message.chat.id] = message.message_thread_id
-            markup = types.ReplyKeyboardMarkup(resize_keyboard=True, one_time_keyboard=True)
-            show = types.KeyboardButton("Show")
-            today = types.KeyboardButton("Today")
-            worker = types.KeyboardButton("Employee")
-            busy = types.KeyboardButton("BusyBoard")
-            markup.row(show, today)
-            markup.row(worker, busy)
-            bot.send_message(message.chat.id, "Слушаю!", reply_markup=markup, message_thread_id=chat_threads.get(message.chat.id))
+                bot.send_message(call.message.chat.id, "Упс... Что-то пошло не так...", message_thread_id=thread_id)
+
     while True:
         try:
             bot.polling()
