@@ -232,6 +232,32 @@ def telegram_bot(token):
                 f"{get_worker_today()}",
                 message_thread_id=thread_id
             )
+        elif call.data == "halls":
+            try:
+                time_now = datetime.datetime.now()
+                start = (datetime.datetime(time_now.year, time_now.month, time_now.day, 0, 0)).isoformat() + 'Z'
+                tomorrow = time_now + datetime.timedelta(days=1)
+                end = (datetime.datetime(tomorrow.year, tomorrow.month, tomorrow.day, 0, 0)).isoformat() + 'Z'
+                events = obj.service.events().list(calendarId=os.getenv('CALENDAR_HALLS_ID'), timeMin=start, timeMax=end, singleEvents=True, orderBy='startTime', maxResults=20, timeZone="UTC").execute()
+                items = events.get('items', [])
+                if items:
+                    lines = []
+                    for event in items:
+                        summary = event.get('summary', '—')
+                        start_time = event['start'].get('dateTime', event['start'].get('date', ''))
+                        if 'T' in start_time:
+                            dt = datetime.datetime.fromisoformat(start_time)
+                            dt = dt + datetime.timedelta(hours=3)
+                            lines.append(f"{dt.strftime('%H:%M')} — {summary}")
+                        else:
+                            lines.append(f"Весь день — {summary}")
+                    result = '\n'.join(lines)
+                    bot.send_message(call.message.chat.id, f"🎭 МЗЗ & 4D на сегодня:\n\n{result}", message_thread_id=thread_id)
+                else:
+                    bot.send_message(call.message.chat.id, "На сегодня событий нет.", message_thread_id=thread_id)
+            except Exception as ex:
+                print(ex)
+                bot.send_message(call.message.chat.id, "Упс... Что-то пошло не так...", message_thread_id=thread_id)
         elif call.data == "busyboard":
             try:
                 time_now = datetime.datetime.now()
